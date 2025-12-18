@@ -98,7 +98,7 @@
 )
 
 (define-read-only (get-treasury-balance)
-  (stx-get-balance (as-contract tx-sender))
+  (stx-get-balance current-contract)
 )
 
 (define-read-only (get-proposal-count)
@@ -128,7 +128,7 @@
   (match (map-get? proposals proposal-id)
     proposal
       (and
-        (< block-height (get end-block proposal))
+        (< stacks-block-height (get end-block proposal))
         (not (get executed proposal))
         (not (get cancelled proposal))
       )
@@ -182,8 +182,8 @@
   (let
     (
       (proposal-id (+ (var-get proposal-count) u1))
-      (start-block block-height)
-      (end-block (+ block-height voting-duration))
+      (start-block stacks-block-height)
+      (end-block (+ stacks-block-height voting-duration))
     )
     (asserts! (is-member tx-sender) err-not-member)
     (asserts! (> amount u0) err-invalid-amount)
@@ -238,10 +238,16 @@
     ;; Update vote counts
     (map-set proposals proposal-id
       (merge proposal
-        (if support
-          {yes-votes: (+ (get yes-votes proposal) voter-power)}
-          {no-votes: (+ (get no-votes proposal) voter-power)}
-        )
+        {
+          yes-votes: (if support 
+            (+ (get yes-votes proposal) voter-power)
+            (get yes-votes proposal)
+          ),
+          no-votes: (if support 
+            (get no-votes proposal)
+            (+ (get no-votes proposal) voter-power)
+          )
+        }
       )
     )
     
@@ -262,16 +268,18 @@
     (
       (proposal (unwrap! (map-get? proposals proposal-id) err-proposal-not-found))
     )
-    (asserts! (>= block-height (get end-block proposal)) err-voting-not-ended)
+    (asserts! (>= stacks-block-height (get end-block proposal)) err-voting-not-ended)
     (asserts! (not (get executed proposal)) err-proposal-already-executed)
     (asserts! (has-proposal-passed proposal-id) err-proposal-not-passed)
     
     ;; Transfer funds from treasury
-    (try! (as-contract (stx-transfer? 
-      (get amount proposal)
-      tx-sender
-      (get recipient proposal)
-    )))
+    (try! (as-contract? ((with-stx (get amount proposal)))
+      (unwrap! (stx-transfer? 
+        (get amount proposal)
+        tx-sender
+        (get recipient proposal)
+      ) (err u500))
+    ))
     
     ;; Mark as executed
     (map-set proposals proposal-id
@@ -321,7 +329,7 @@
 (define-public (deposit-to-treasury (amount uint))
   (begin
     (asserts! (> amount u0) err-invalid-amount)
-    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+    (try! (stx-transfer? amount tx-sender current-contract))
     (print {
       event: "treasury-deposit",
       from: tx-sender,
@@ -335,7 +343,9 @@
 (define-public (emergency-withdraw (amount uint) (recipient principal))
   (begin
     (asserts! (is-eq tx-sender contract-owner) err-owner-only)
-    (try! (as-contract (stx-transfer? amount tx-sender recipient)))
+    (try! (as-contract? ((with-stx amount))
+      (unwrap! (stx-transfer? amount tx-sender recipient) (err u500))
+    ))
     (print {
       event: "emergency-withdrawal",
       amount: amount,
