@@ -46,3 +46,45 @@
     cancelled: bool
   }
 )
+
+(define-map votes
+  {proposal-id: uint, voter: principal}
+  {vote: bool, power: uint}
+)
+
+(define-map member-voting-power principal uint)
+
+;; Private Functions
+
+(define-private (is-member (account principal))
+  (default-to false (map-get? members account))
+)
+
+(define-private (get-voting-power (account principal))
+  (default-to u1 (map-get? member-voting-power account))
+)
+
+(define-private (has-voted (proposal-id uint) (voter principal))
+  (is-some (map-get? votes {proposal-id: proposal-id, voter: voter}))
+)
+
+(define-private (calculate-quorum (total-votes uint))
+  (/ (* (var-get member-count) quorum-percentage) u100)
+)
+
+(define-private (calculate-approval (yes-votes uint) (total-votes uint))
+  (if (> total-votes u0)
+    (>= (/ (* yes-votes u100) total-votes) approval-threshold)
+    false
+  )
+)
+
+;; Read-Only Functions
+
+(define-read-only (get-proposal (proposal-id uint))
+  (map-get? proposals proposal-id)
+)
+
+(define-read-only (get-vote (proposal-id uint) (voter principal))
+  (map-get? votes {proposal-id: proposal-id, voter: voter})
+)
