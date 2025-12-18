@@ -88,3 +88,73 @@
 (define-read-only (get-vote (proposal-id uint) (voter principal))
   (map-get? votes {proposal-id: proposal-id, voter: voter})
 )
+
+(define-read-only (is-dao-member (account principal))
+  (is-member account)
+)
+
+(define-read-only (get-member-power (account principal))
+  (get-voting-power account)
+)
+
+(define-read-only (get-treasury-balance)
+  (stx-get-balance (as-contract tx-sender))
+)
+
+(define-read-only (get-proposal-count)
+  (var-get proposal-count)
+)
+
+(define-read-only (get-member-count)
+  (var-get member-count)
+)
+
+(define-read-only (has-proposal-passed (proposal-id uint))
+  (match (map-get? proposals proposal-id)
+    proposal
+      (let
+        (
+          (total-votes (+ (get yes-votes proposal) (get no-votes proposal)))
+          (quorum-met (>= total-votes (calculate-quorum total-votes)))
+          (approved (calculate-approval (get yes-votes proposal) total-votes))
+        )
+        (and quorum-met approved)
+      )
+    false
+  )
+)
+
+(define-read-only (is-voting-active (proposal-id uint))
+  (match (map-get? proposals proposal-id)
+    proposal
+      (and
+        (< block-height (get end-block proposal))
+        (not (get executed proposal))
+        (not (get cancelled proposal))
+      )
+    false
+  )
+)
+
+;; Public Functions
+
+;; Initialize DAO with founding members
+(define-public (initialize-dao (founding-members (list 10 principal)))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (map add-member founding-members)
+    (ok true)
+  )
+)
+
+;; Add a new member (governance action)
+(define-public (add-member (new-member principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (map-set members new-member true)
+    (map-set member-voting-power new-member u1)
+    (var-set member-count (+ (var-get member-count) u1))
+    (print {event: "member-added", member: new-member})
+    (ok true)
+  )
+)
