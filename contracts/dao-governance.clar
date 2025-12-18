@@ -158,3 +158,100 @@
     (ok true)
   )
 )
+
+;; Remove a member (governance action)
+(define-public (remove-member (member principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (is-member member) err-not-member)
+    (map-delete members member)
+    (map-delete member-voting-power member)
+    (var-set member-count (- (var-get member-count) u1))
+    (print {event: "member-removed", member: member})
+    (ok true)
+  )
+)
+
+;; Create a new proposal
+(define-public (create-proposal 
+  (title (string-ascii 256))
+  (description (string-ascii 1024))
+  (recipient principal)
+  (amount uint)
+)
+  (let
+    (
+      (proposal-id (+ (var-get proposal-count) u1))
+      (start-block block-height)
+      (end-block (+ block-height voting-duration))
+    )
+    (asserts! (is-member tx-sender) err-not-member)
+    (asserts! (> amount u0) err-invalid-amount)
+    (asserts! (<= amount (get-treasury-balance)) err-insufficient-balance)
+    
+    (map-set proposals proposal-id
+      {
+        proposer: tx-sender,
+        title: title,
+        description: description,
+        recipient: recipient,
+        amount: amount,
+        start-block: start-block,
+        end-block: end-block,
+        yes-votes: u0,
+        no-votes: u0,
+        executed: false,
+        cancelled: false
+      }
+    )
+    
+    (var-set proposal-count proposal-id)
+    (print {
+      event: "proposal-submitted",
+      proposal-id: proposal-id,
+      proposer: tx-sender,
+      title: title,
+      amount: amount,
+      recipient: recipient
+    })
+    (ok proposal-id)
+  )
+)
+
+;; Vote on a proposal
+(define-public (vote (proposal-id uint) (support bool))
+  (let
+    (
+      (proposal (unwrap! (map-get? proposals proposal-id) err-proposal-not-found))
+      (voter-power (get-voting-power tx-sender))
+    )
+    (asserts! (is-member tx-sender) err-not-member)
+    (asserts! (not (has-voted proposal-id tx-sender)) err-already-voted)
+    (asserts! (is-voting-active proposal-id) err-voting-ended)
+    
+    ;; Record the vote
+    (map-set votes
+      {proposal-id: proposal-id, voter: tx-sender}
+      {vote: support, power: voter-power}
+    )
+    
+    ;; Update vote counts
+    (map-set proposals proposal-id
+      (merge proposal
+        (if support
+          {yes-votes: (+ (get yes-votes proposal) voter-power)}
+          {no-votes: (+ (get no-votes proposal) voter-power)}
+        )
+      )
+    )
+    
+    (print {
+      event: "vote-cast",
+      proposal-id: proposal-id,
+      voter: tx-sender,
+      support: support,
+      power: voter-power
+    })
+    (ok true)
+  )
+)
